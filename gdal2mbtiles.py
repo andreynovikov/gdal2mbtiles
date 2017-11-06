@@ -1300,12 +1300,16 @@ class GDAL2Mbtiles(object):
                 if self.options.verbose:
                     print(ti, '/', tcount, tilefilename)  # , "( TileMapService: z / x / y )"
 
-                if self.options.resume and os.path.exists(tilefilename):
-                    if self.options.verbose:
-                        print("Tile generation skiped because of --resume")
-                    else:
-                        queue.put(tcount)
-                    continue
+                if self.options.resume:
+                    cur.execute("""SELECT 1 FROM tiles WHERE zoom_level = ?
+                                   AND tile_column = ? AND tile_row = ?""", (tz, tx, ty))
+                    exists = cur.fetchone()
+                    if exists is not None:
+                        if self.options.verbose:
+                            print("Tile generation skiped because of --resume")
+                        else:
+                            queue.put(tcount)
+                        continue
 
                 if self.options.profile == 'mercator':
                     # Tile bounds in EPSG:900913
@@ -2673,10 +2677,11 @@ class ProgressBar(QtCore.QObject):
 def worker_metadata(gdal2mbtiles):
     gdal2mbtiles.open_input()
     con = gdal2mbtiles.mbtiles_connect()
-    cur = con.cursor()
-    gdal2mbtiles.mbtiles_setup(cur)
-    gdal2mbtiles.generate_metadata(cur)
-    con.commit()
+    if not gdal2mbtiles.options.resume:
+        cur = con.cursor()
+        gdal2mbtiles.mbtiles_setup(cur)
+        gdal2mbtiles.generate_metadata(cur)
+        con.commit()
     con.close()
     sys.stdout.flush()
 
@@ -2765,9 +2770,11 @@ def main(progress,argv = None):
             except:
                 pass
         [p.join(timeout=1) for p in procs]
-    print('Indexing tiles')
+
     con = gdal2mbtiles.mbtiles_connect()
-    gdal2mbtiles.create_index(con.cursor())
+    if not gdal2mbtiles.options.resume:
+        print('Indexing tiles')
+        gdal2mbtiles.create_index(con.cursor())
     con.execute('''PRAGMA journal_mode=DELETE''')
 
 
